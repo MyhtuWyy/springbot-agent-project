@@ -1,0 +1,51 @@
+### Java / Maven ###
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+logs/
+images/
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.ipr
+*.iml
+# 若需共享部分IDEA配置，可取消以下注释并删除上方 .idea/ 行
+# .idea/workspace.xml
+# .idea/compiler.xml
+# .idea/deepseek-*
+# .idea/libraries/
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+### Kotlin ###
+.kotlin
+
+### Env ###
+.env
+
+src/main/resources/application.yml

@@ -41,6 +41,7 @@ public class ToolIntentRouter {
     private static final Pattern PHONE_LAST4_PATTERN = Pattern.compile("(?<!\\d)(\\d{4})(?!\\d)");
     private static final Pattern EXPLICIT_ROUTE_PATTERN = Pattern.compile("(?:从\\s*)?([^，。；,、]{2,30}?)\\s*(?:出发|启程)?\\s*[，,、\\s]*\\s*(?:到|去|前往|抵达)\\s*([^，。；,、]{2,30})");
     private static final Pattern SIMPLE_ROUTE_PATTERN = Pattern.compile("([^，。；,、\\s]{2,20}?)\\s*(?:到|去|前往)\\s*([^，。；,、\\s]{2,20})");
+    private static final Pattern CHINESE_TRIP_DAYS_PATTERN = Pattern.compile("([一二两三四五六七八九十])\\s*[天日]");
 
     public enum RouteMode {
         FORCE_TOOL,
@@ -456,7 +457,7 @@ public class ToolIntentRouter {
                 context.getString("destination"),
                 pair == null ? null : pair[0] + "->" + pair[1],
                 args.toJSONString());
-        return forceRoute("query_train_tickets", args, true);
+        return forceRoute("query_train_tickets", args, false);
     }
 
     private ToolRoute buildPoiRoute(String sessionId, String userMessage) {
@@ -619,12 +620,33 @@ public class ToolIntentRouter {
             int value = Integer.parseInt(explicit.group(1));
             return value >= 1 && value <= 15 ? value : null;
         }
+        Matcher chinese = CHINESE_TRIP_DAYS_PATTERN.matcher(text);
+        if (chinese.find()) {
+            int value = parseChineseNumber(chinese.group(1));
+            return value >= 1 && value <= 15 ? value : null;
+        }
         if (text.contains("一日游")) return 1;
         if (text.contains("两日游") || text.contains("二日游")) return 2;
         if (text.contains("三日游")) return 3;
         if (text.contains("四日游")) return 4;
         if (text.contains("五日游")) return 5;
         return null;
+    }
+
+    private int parseChineseNumber(String value) {
+        return switch (value) {
+            case "一" -> 1;
+            case "二", "两" -> 2;
+            case "三" -> 3;
+            case "四" -> 4;
+            case "五" -> 5;
+            case "六" -> 6;
+            case "七" -> 7;
+            case "八" -> 8;
+            case "九" -> 9;
+            case "十" -> 10;
+            default -> 0;
+        };
     }
 
     private JSONObject buildCopyArgs(String userMessage, String normalized) {
@@ -939,6 +961,8 @@ public class ToolIntentRouter {
     private String sanitizeRoutePlace(String value) {
         if (value == null) return null;
         String cleaned = value.trim()
+                .replaceAll("^(?:我(?:今天|现在)?|今天)?\\s*从\\s*", "")
+                .replaceAll("^我(?:今天|现在)?在\\s*", "")
                 .replaceAll("^(今天|明天|后天|本周末|周末|下周末|上午|下午|晚上|早上)+", "")
                 .replaceAll("^[从由在向往去到赴前往抵达]+", "")
                 .replaceAll("(怎么走|如何走|路线规划|路线|导航|乘车|坐车|打车|步行|自驾|公交|地铁|出行计划|行程规划|旅游攻略)$", "")
@@ -955,6 +979,11 @@ public class ToolIntentRouter {
         if (cleaned == null) {
             return null;
         }
+        cleaned = cleaned
+                .replaceFirst("^(查询一下|查询|查一下|帮我查询|帮我查|请查询|请查|我想查询|我想查)\\s*", "")
+                .replaceFirst("^\\d{4}-\\d{1,2}-\\d{1,2}\\s*", "")
+                .replaceFirst("^从\\s*", "")
+                .trim();
         cleaned = cleaned.replaceAll("(高铁票|火车票|车票|高铁|火车)$", "").trim();
         cleaned = cleaned.replaceAll("的$", "").trim();
         return cleaned.isBlank() ? null : cleaned;

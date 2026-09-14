@@ -12,5 +12,8 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessageEntity, 
 
     ChatMessageEntity findTop1BySessionIdOrderByCreatedAtDesc(String sessionId);
 
+    ChatMessageEntity findTop1BySessionIdAndRoleAndMessageTypeOrderByCreatedAtDesc(
+            String sessionId, String role, String messageType);
+
     void deleteBySessionId(String sessionId);
 }

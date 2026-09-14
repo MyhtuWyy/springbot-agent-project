@@ -11,6 +11,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.InterruptedIOException;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Base64;
 import java.util.List;
 import java.util.function.Consumer;
@@ -27,9 +29,11 @@ public class BailianService {
     private static final String TOOL_RESULT_RENDER_PROMPT = """
             You are a Chinese assistant.
             Answer directly based on the tool result without describing the tool call process.
-            Keep the reply concise and well-structured in Chinese.
-            Always return clean Markdown. Use short headings, lists, tables, blockquotes, and bold labels when they improve readability.
-            You may use a small number of friendly emojis when helpful, but do not overuse them.
+            Keep the reply concise: normally 1-5 short lines, or a small table when there are multiple records.
+            Always return clean Markdown. Use one short heading, compact lists, tables, blockquotes, and bold labels only when they improve scanning.
+            Preserve exact names, dates, times, prices, availability, and numbers from the tool result.
+            Never invent missing records, recommendations, prices, train numbers, or travel times.
+            Do not add generic advice unless the tool result contains it or the user asks for it.
             Do not output HTML tags.
             """;
 
@@ -82,7 +86,7 @@ public class BailianService {
             21. Invoice OCR, invoice export, and invoice verification requests must use invoice_skill.
             22. Voice transcription and speech synthesis requests must use speech_skill.
             23. Reminder, alarm, scheduled push, and recurring notification requests must use scheduled_task_skill.
-            24. Today is 2026-08-05 in Asia/Shanghai. Convert relative dates like today, tomorrow, and the day after tomorrow into exact dates and do not invent another year.
+            24. Today is {{TODAY}} in Asia/Shanghai. Convert relative dates like today, tomorrow, and the day after tomorrow into exact dates and do not invent another year.
 
             Tool argument rules:
             1. Keep user location wording as faithfully as possible.
@@ -90,9 +94,10 @@ public class BailianService {
             3. If required information is missing, ask a concise follow-up question instead of fabricating values.
 
             Response rules:
-            1. After a tool returns, answer in concise natural Chinese.
-            2. Always format replies as clean Markdown. For multiple items, use short headings and valid continuous lists; use tables, blockquotes, and bold labels when helpful.
-            3. You may use a small number of friendly emojis when it improves readability, but keep the tone professional and do not overuse them.
+            1. After a tool returns, answer in concise natural Chinese; for a focused query, keep it within 5 short lines when possible.
+            2. Always format replies as clean Markdown. For multiple items, use a short heading and a compact table or continuous list.
+            3. Preserve factual values from tools exactly. Never invent missing records, prices, times, train numbers, or recommendations.
+            4. You may use a small number of friendly emojis when it improves readability, but keep the tone professional and do not overuse them.
             4. If tools are not needed, reply directly.
             5. You may call multiple tools when necessary.
             4. Do not mention tool calls, tool names, workflow status, or phrases like “已完成工具调用”, “基于工具结果”, or “工具返回”.
@@ -150,6 +155,13 @@ public class BailianService {
     public String chatWithTools(List<ConversationMemoryService.ConversationMessage> history,
                                 String userMessage,
                                 ToolIntentRouter.ToolRoute preferredRoute) {
+        return chatWithTools(history, userMessage, preferredRoute, null);
+    }
+
+    public String chatWithTools(List<ConversationMemoryService.ConversationMessage> history,
+                                String userMessage,
+                                ToolIntentRouter.ToolRoute preferredRoute,
+                                Consumer<String> onProgress) {
         String apiKey = runtimeConfig().apiKey();
         if (apiKey.isBlank()) {
             return "DashScope API key is missing.";
@@ -157,7 +169,7 @@ public class BailianService {
 
         try {
             JSONArray messages = new JSONArray();
-            messages.add(systemMessage(SYSTEM_PROMPT));
+            messages.add(systemMessage(systemPrompt()));
 
             if (preferredRoute != null) {
                 messages.add(systemMessage(buildAgentHint(preferredRoute)));
@@ -184,7 +196,7 @@ public class BailianService {
 
             JSONArray tools = resolveCandidateTools(preferredRoute);
             if (isTravelPlanningRoute(preferredRoute)) {
-                return runDeterministicTravelWorkflow(messages, userMessage, preferredRoute);
+                return runDeterministicTravelWorkflow(messages, userMessage, preferredRoute, onProgress);
             }
             for (int step = 1; step <= AGENT_MAX_STEPS; step++) {
                 JSONObject assistantMessage = callForMessage(
@@ -339,7 +351,8 @@ public class BailianService {
 
     private String runDeterministicTravelWorkflow(JSONArray messages,
                                                   String userMessage,
-                                                  ToolIntentRouter.ToolRoute preferredRoute) throws Exception {
+                                                  ToolIntentRouter.ToolRoute preferredRoute,
+                                                  Consumer<String> onProgress) throws Exception {
         JSONObject routeArgs = preferredRoute.arguments() == null ? new JSONObject() : preferredRoute.arguments();
 
         String origin = trimToNull(routeArgs.getString("origin"));
@@ -358,6 +371,7 @@ public class BailianService {
                 city, origin, destination, travelDate, tripDays, timePreference);
 
         boolean includeConcreteRoute = shouldIncludeConcreteRouteInTravelWorkflow(userMessage, origin, destination);
+        String ticketResult = null;
 
         if (isSpecificRoutePoint(origin) && isSpecificRoutePoint(destination) && !samePlace(origin, destination)) {
             JSONObject ticketArgs = new JSONObject();
@@ -372,8 +386,11 @@ public class BailianService {
             if (timePreference != null) {
                 ticketArgs.put("time_preference", timePreference);
             }
-            String ticketResult = executeWorkflowTool(messages, "query_train_tickets", ticketArgs);
+            ticketResult = executeWorkflowTool(messages, "query_train_tickets", ticketArgs);
             if (isStationClarificationReply(ticketResult)) {
+                if (onProgress != null && !ticketResult.isBlank()) {
+                    onProgress.accept(ticketResult);
+                }
                 return ticketResult;
             }
         }
@@ -414,19 +431,21 @@ public class BailianService {
         JSONArray summaryMessages = new JSONArray();
         summaryMessages.add(systemMessage("""
                 You are a Chinese travel planning assistant.
-                Summarize only from the factual results already provided.
-                Do not claim any real-time data that is not present in the provided results.
-                If ticket lookup failed, say it failed plainly and continue with the rest of the plan.
-                Keep the answer practical, concise, and easy to scan.
-                The final answer must use exactly this order:
-                1. 天气情况
-                2. 合适的高铁票（优先整理为 3 班，若结果不足就如实说明）
-                3. 攻略规划
-                4. 出行小贴士
-                Build a day-by-day itinerary with exactly %d days in the 攻略规划 section.
-                For each day, include recommended attractions, meal suggestions, and a sensible visit order.
-                Use short section titles and clear bullet-style wording in Chinese.
-                The content should be clear, direct, and easy to understand at a glance.
+                 Summarize only from the factual results already provided.
+                 Do not claim any real-time data that is not present in the provided results.
+                 If ticket lookup failed, say it failed plainly and continue with the rest of the plan.
+                 Keep the answer practical, concise, and easy to scan; avoid long explanations.
+                 The final answer must use exactly this order:
+                 1. 天气情况
+                 2. 合适的高铁票（优先整理为 3 班，若结果不足就如实说明）
+                 3. 攻略规划
+                 4. 出行小贴士
+                 Build a day-by-day itinerary with exactly %d days in the 攻略规划 section.
+                 For each day, include at most 3 concise bullets covering attractions, meals, and visit order.
+                 For the ticket section, copy the returned train numbers, times, prices, and availability exactly.
+                 If no train list was returned, say so briefly; never infer or invent train details.
+                 Use short section titles and compact Markdown tables or bullets in Chinese.
+                 The content should be clear, direct, and easy to understand at a glance.
                 If no concrete route was explicitly requested, do not mention route lookup, missing route parameters, or route lookup failures.
                 You may end with one short sentence inviting the user to ask for a specific route between exact places if useful.
                 Do not mention tool calls, tool names, workflows, or any internal execution process.
@@ -440,7 +459,54 @@ public class BailianService {
         String finalReply = callForContent(summaryMessages, 0.4, 2200);
         log.info("Deterministic travel workflow final reply: preferredRoute={}, reply={}",
                 preferredRoute.functionName(), finalReply);
-        return finalReply != null && !finalReply.isBlank() ? finalReply.trim() : "\u51fa\u884c\u89c4\u5212\u751f\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002";
+        String result = finalReply != null && !finalReply.isBlank()
+                ? finalReply.trim()
+                : "\u51fa\u884c\u89c4\u5212\u751f\u6210\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002";
+        result = enforceTicketSection(result, ticketResult);
+        if (onProgress != null && !result.isBlank()) {
+            onProgress.accept(result);
+        }
+        return result;
+    }
+
+    private String enforceTicketSection(String reply, String ticketResult) {
+        if (reply == null || reply.isBlank() || ticketResult == null || ticketResult.isBlank()) {
+            return reply;
+        }
+
+        int ticketHeader = findWorkflowSection(reply, "2.", "高铁票");
+        int planHeader = findWorkflowSection(reply, "3.", "攻略规划");
+        if (ticketHeader < 0 || planHeader <= ticketHeader) {
+            return reply;
+        }
+
+        String compactTicket = ticketResult.trim()
+                .replaceFirst("^###\\s*🚄\\s*高铁票\\s*", "")
+                .trim();
+        return reply.substring(0, ticketHeader)
+                + "2. 合适的高铁票\n"
+                + compactTicket
+                + "\n\n"
+                + reply.substring(planHeader);
+    }
+
+    private int findWorkflowSection(String text, String ordinal, String title) {
+        int searchFrom = 0;
+        while (searchFrom < text.length()) {
+            int index = text.indexOf(ordinal, searchFrom);
+            if (index < 0) {
+                return -1;
+            }
+            int lineEnd = text.indexOf('\n', index);
+            if (lineEnd < 0) {
+                lineEnd = text.length();
+            }
+            if (text.substring(index, lineEnd).contains(title)) {
+                return index;
+            }
+            searchFrom = lineEnd + 1;
+        }
+        return -1;
     }
 
     private String buildTravelMissingArgsReply(String origin,
@@ -818,7 +884,7 @@ public class BailianService {
         StringBuilder reply = new StringBuilder();
         try {
             JSONArray messages = new JSONArray();
-            messages.add(systemMessage(SYSTEM_PROMPT));
+            messages.add(systemMessage(systemPrompt()));
 
             if (history != null) {
                 int start = Math.max(0, history.size() - MAX_HISTORY_MESSAGES);
@@ -994,6 +1060,13 @@ public class BailianService {
             return toolRegistry.buildToolsJson();
         }
         return toolRegistry.buildToolsJson(validCandidates);
+    }
+
+    private String systemPrompt() {
+        return SYSTEM_PROMPT.replace(
+                "{{TODAY}}",
+                LocalDate.now(ZoneId.of("Asia/Shanghai")).toString()
+        );
     }
 
     private JSONObject systemMessage(String content) {

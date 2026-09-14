@@ -47,13 +47,26 @@ public class ConversationService {
 
         ToolExecutionContextHolder.set(UserSessionContext.fromSessionId(sessionId));
         try {
+            List<ConversationMemoryService.ConversationMessage> history = memoryService.getMessages(sessionId);
             MessageRoutingService.RouteResult routeResult = messageRoutingService.route(sessionId, normalized);
             recordMonitorRoute(routeResult);
+            memoryService.addUserMessage(sessionId, normalized);
+            StringBuilder streamedReply = new StringBuilder();
+            Consumer<String> persistentDelta = delta -> {
+                if (delta == null || delta.isEmpty()) {
+                    return;
+                }
+                streamedReply.append(delta);
+                memoryService.saveStreamingAssistantMessage(sessionId, streamedReply.toString());
+                if (onDelta != null) {
+                    onDelta.accept(delta);
+                }
+            };
             String reply;
             if (routeResult.replyText() != null) {
                 reply = routeResult.replyText().isBlank() ? "" : finalizeReply(routeResult.replyText());
                 if (!reply.isBlank() && onDelta != null) {
-                    onDelta.accept(reply);
+                    persistentDelta.accept(reply);
                 }
             } else if (routeResult.forcedToolRoute() != null) {
                 reply = finalizeReply(bailianService.replyWithForcedToolStream(
@@ -62,25 +75,18 @@ public class ConversationService {
                         routeResult.forcedToolRoute().functionName(),
                         routeResult.forcedToolRoute().arguments(),
                         routeResult.forcedToolRoute().renderWithModel(),
-                        onDelta
+                        persistentDelta
                 ));
             } else if (routeResult.preferredToolRoute() != null) {
-                reply = processAgentMessage(sessionId, normalized, routeResult.preferredToolRoute());
-                if (!reply.isBlank() && onDelta != null) {
-                    onDelta.accept(reply);
-                }
+                reply = processAgentMessage(history, normalized, routeResult.preferredToolRoute(), persistentDelta);
             } else if (routeResult.normalChat()) {
-                List<ConversationMemoryService.ConversationMessage> history = memoryService.getMessages(sessionId);
-                reply = finalizeReply(bailianService.streamPlainChat(history, normalized, onDelta));
+                reply = finalizeReply(bailianService.streamPlainChat(history, normalized, persistentDelta));
             } else {
                 reply = DEFAULT_REPLY;
-                if (onDelta != null) {
-                    onDelta.accept(reply);
-                }
+                persistentDelta.accept(reply);
             }
 
-            memoryService.addUserMessage(sessionId, normalized);
-            memoryService.addAssistantMessage(sessionId, reply);
+            memoryService.completeStreamingAssistantMessage(sessionId, reply);
             return finalizeReply(reply);
         } finally {
             ToolExecutionContextHolder.clear();
@@ -189,8 +195,21 @@ public class ConversationService {
     }
 
     private String processAgentMessage(String sessionId, String text, ToolIntentRouter.ToolRoute preferredRoute) {
-        List<ConversationMemoryService.ConversationMessage> history = memoryService.getMessages(sessionId);
+        return processAgentMessage(memoryService.getMessages(sessionId), text, preferredRoute);
+    }
+
+    private String processAgentMessage(List<ConversationMemoryService.ConversationMessage> history,
+                                       String text,
+                                       ToolIntentRouter.ToolRoute preferredRoute) {
         String reply = bailianService.chatWithTools(history, text, preferredRoute);
+        return finalizeReply(reply);
+    }
+
+    private String processAgentMessage(List<ConversationMemoryService.ConversationMessage> history,
+                                       String text,
+                                       ToolIntentRouter.ToolRoute preferredRoute,
+                                       Consumer<String> onProgress) {
+        String reply = bailianService.chatWithTools(history, text, preferredRoute, onProgress);
         return finalizeReply(reply);
     }
 

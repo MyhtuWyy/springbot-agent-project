@@ -29,7 +29,6 @@ public class TrainTicketService {
     private static final String PENDING_WORKFLOW_KEY = "pendingTravelWorkflow";
     private static final String PENDING_ORIGIN_CANDIDATES_KEY = "pendingOriginCandidates";
     private static final String PENDING_DESTINATION_CANDIDATES_KEY = "pendingDestinationCandidates";
-
     @Value("${travel.train-ticket.api-key:}")
     private String injectedApiKey;
 
@@ -95,7 +94,7 @@ public class TrainTicketService {
 
         try {
             log.info("train ticket api request, origin={}, destination={}, date={}, timePreference={}, url={}",
-                    from, to, date, period, requestUrl);
+                    from, to, date, period, redactApiKey(requestUrl));
             String body = HttpUtil.doGet(requestUrl);
             log.info("train ticket api response body, origin={}, destination={}, date={}, timePreference={}, body={}",
                     from, to, date, period, abbreviate(body, 800));
@@ -243,16 +242,7 @@ public class TrainTicketService {
             return "高铁票务接口返回错误：" + (message != null ? message : responseCode);
         }
 
-        JSONArray trains = json.getJSONArray("result");
-        if (trains == null || trains.isEmpty()) trains = json.getJSONArray("data");
-        if (trains == null || trains.isEmpty()) trains = json.getJSONArray("trains");
-        if ((trains == null || trains.isEmpty()) && json.getJSONObject("result") != null) {
-            JSONObject resultObj = json.getJSONObject("result");
-            trains = resultObj == null ? null : resultObj.getJSONArray("list");
-            if (trains == null || trains.isEmpty()) {
-                trains = resultObj == null ? null : resultObj.getJSONArray("data");
-            }
-        }
+        JSONArray trains = extractTrainList(json);
 
         if (trains == null || trains.isEmpty()) {
             String message = firstNonBlank(
@@ -263,7 +253,7 @@ public class TrainTicketService {
             if (message != null && !"success".equalsIgnoreCase(message)) {
                 return "高铁票务接口返回：" + message;
             }
-            return "高铁票务接口未返回车次列表。";
+            return "没有查询到对应的车次，建议查询其他的高铁票。";
         }
 
         List<String> rows = new ArrayList<>();
@@ -301,37 +291,74 @@ public class TrainTicketService {
                     item.getString("spend_time"),
                     "unknown"
             );
-            String price = firstNonBlank(
+            JSONArray prices = item.getJSONArray("prices");
+            String secondClass = firstNonBlank(
+                    extractSeatPrice(prices, "二等座"),
                     item.getString("second_class_price"),
                     item.getString("secondClassPrice"),
-                    item.getString("price"),
-                    extractPriceSummary(item.getJSONArray("prices")),
-                    item.getString("business_price"),
-                    "unknown"
+                    "暂无"
             );
+            String firstClass = firstNonBlank(extractSeatPrice(prices, "一等座"), "暂无");
+            String businessClass = firstNonBlank(extractSeatPrice(prices, "商务座"), "暂无");
             String booking = firstNonBlank(
                     item.getString("enable_booking"),
                     item.getString("bookable"),
                     item.getString("can_book")
             );
 
-            String row = (rows.size() + 1) + ". " + trainNo + " " + departTime + "-" + arriveTime
-                    + ", duration " + duration + ", price " + price;
-            if (booking != null) {
-                row += ", " + ("Y".equalsIgnoreCase(booking) ? "bookable" : "not bookable");
-            }
+            String row = "| " + trainNo
+                    + " | " + departTime
+                    + " | " + arriveTime
+                    + " | " + duration
+                    + " | " + secondClass
+                    + " | " + firstClass
+                    + " | " + businessClass
+                    + " | " + formatBookingStatus(booking) + " |";
             rows.add(row);
         }
 
         if (rows.isEmpty()) {
-            return "高铁票务信息：" + origin + " -> " + destination + "，日期 " + travelDate
-                    + (timePreference == null ? "" : ", period " + timePreference)
-                    + "，未筛到符合条件的车次。";
+            return "没有查询到对应的车次，建议查询其他的高铁票。";
         }
 
-        return "高铁票务信息：" + origin + " -> " + destination + "，日期 " + travelDate
-                + (timePreference == null ? "" : ", period " + timePreference)
-                + " (top 3)\n" + String.join("\n", rows);
+        return "### 🚄 高铁票\n\n"
+                + "**" + origin + " → " + destination + "** · " + travelDate
+                + (timePreference == null ? "" : " · " + timePreference)
+                + "\n\n| 车次 | 出发 | 到达 | 耗时 | 二等座 | 一等座 | 商务座 | 状态 |\n"
+                + "|---|---:|---:|---:|---:|---:|---:|---|\n"
+                + String.join("\n", rows);
+    }
+
+    private JSONArray extractTrainList(JSONObject json) {
+        if (json == null) {
+            return null;
+        }
+        JSONArray trains = json.getJSONArray("result");
+        if (trains != null) {
+            return trains;
+        }
+
+        JSONObject resultObj = json.getJSONObject("result");
+        if (resultObj != null) {
+            trains = resultObj.getJSONArray("list");
+            if (trains != null) {
+                return trains;
+            }
+            trains = resultObj.getJSONArray("data");
+            if (trains != null) {
+                return trains;
+            }
+        }
+
+        trains = json.getJSONArray("data");
+        if (trains != null) {
+            return trains;
+        }
+        trains = json.getJSONArray("trains");
+        if (trains != null) {
+            return trains;
+        }
+        return null;
     }
 
     private String buildMissingArgsMessage(String origin, String destination, String travelDate) {
@@ -396,6 +423,36 @@ public class TrainTicketService {
         return values.isEmpty() ? null : String.join(" / ", values);
     }
 
+    private String extractSeatPrice(JSONArray prices, String seatName) {
+        if (prices == null || prices.isEmpty() || seatName == null) {
+            return null;
+        }
+        for (int i = 0; i < prices.size(); i++) {
+            JSONObject item = prices.getJSONObject(i);
+            if (item == null || !seatName.equals(trimToNull(item.getString("seat_name")))) {
+                continue;
+            }
+            String price = firstNonBlank(item.getString("price"), item.getString("amount"), item.getString("value"));
+            String count = firstNonBlank(item.getString("num"), item.getString("count"), item.getString("remaining"));
+            if (price == null) {
+                return count == null ? null : count;
+            }
+            return count == null ? price + "元" : price + "元（" + count + "）";
+        }
+        return null;
+    }
+
+    private String formatBookingStatus(String booking) {
+        if (booking == null) {
+            return "—";
+        }
+        return "Y".equalsIgnoreCase(booking)
+                || "1".equals(booking)
+                || "true".equalsIgnoreCase(booking)
+                ? "可订"
+                : "不可订";
+    }
+
     private String abbreviate(String text, int maxLength) {
         if (text == null) return "";
         if (text.length() <= maxLength) return text;
@@ -415,6 +472,10 @@ public class TrainTicketService {
             sb.append("&departure_time_range=").append(urlEncode(period));
         }
         return sb.toString();
+    }
+
+    private String redactApiKey(String url) {
+        return url == null ? "" : url.replaceAll("(?i)([?&]key=)[^&]*", "$1***");
     }
 
     private String urlEncode(String value) {

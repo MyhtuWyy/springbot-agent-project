@@ -52,7 +52,7 @@ public class TravelPlanTool implements ToolDefinition {
         JSONObject properties = new JSONObject();
         properties.put("city", stringProperty("可选，城市名或整句需求，例如 洛阳旅游攻略"));
         properties.put("destination", stringProperty("可选，具体地点，例如 龙门石窟、西湖"));
-        properties.put("travel_date", stringProperty("可选，出行日期，例如 2026-08-05、今天、明天、后天"));
+        properties.put("travel_date", stringProperty("可选，出行日期，例如 2026-09-14、今天、明天、后天"));
         properties.put("trip_days", integerProperty("可选，游玩天数，例如 2、3。"));
 
         JSONObject travelType = stringProperty("攻略类型：attractions=景点，food=美食，both=都要");

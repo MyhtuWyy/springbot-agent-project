@@ -42,4 +42,41 @@ class ToolIntentRouterTest {
         assertEquals("travel", route.arguments().getString("scene"));
         assertEquals(1, route.arguments().getIntValue("count"));
     }
+
+    @Test
+    void shouldParseChineseTripDaysAndCleanNaturalOrigin() {
+        ConversationMemoryService memoryService = Mockito.mock(ConversationMemoryService.class);
+        Mockito.when(memoryService.getTravelContext(Mockito.anyString())).thenReturn(new com.alibaba.fastjson2.JSONObject());
+
+        ToolIntentRouter router = new ToolIntentRouter(new CityResolver(), memoryService);
+        ToolIntentRouter.ToolRoute route = router.match(
+                "desktop:test-session",
+                "我今天从洛阳出发，去西安旅游，玩三天"
+        );
+
+        assertNotNull(route);
+        assertEquals("plan_travel", route.functionName());
+        assertEquals("洛阳", route.arguments().getString("origin"));
+        assertEquals("西安", route.arguments().getString("destination"));
+        assertEquals(3, route.arguments().getIntValue("trip_days"));
+    }
+
+    @Test
+    void shouldKeepFocusedTrainTicketReplyAsToolMarkdown() {
+        ConversationMemoryService memoryService = Mockito.mock(ConversationMemoryService.class);
+        Mockito.when(memoryService.getTravelContext(Mockito.anyString())).thenReturn(new com.alibaba.fastjson2.JSONObject());
+
+        ToolIntentRouter router = new ToolIntentRouter(new CityResolver(), memoryService);
+        ToolIntentRouter.ToolRoute route = router.match(
+                "desktop:test-session",
+                "查询2026-09-14从洛阳龙门到北京西的高铁票"
+        );
+
+        assertNotNull(route);
+        assertEquals("query_train_tickets", route.functionName());
+        assertEquals(ToolIntentRouter.RouteMode.FORCE_TOOL, route.routeMode());
+        assertEquals(false, route.renderWithModel());
+        assertEquals("洛阳龙门", route.arguments().getString("origin"));
+        assertEquals("北京西", route.arguments().getString("destination"));
+    }
 }

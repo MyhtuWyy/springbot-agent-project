@@ -23,6 +23,8 @@ public class WeatherService {
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final String WTTR_URL = "https://wttr.in/%s?format=j1&lang=zh";
+    private static final long WTTR_TIMEOUT_MS = 5_000L;
+    private static final long OPEN_METEO_TIMEOUT_MS = 8_000L;
     private static final String OPEN_METEO_URL =
             "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s&current_weather=true&timezone=auto";
 
@@ -67,7 +69,8 @@ public class WeatherService {
     private String fetchWttr(String city, String targetDate) {
         try {
             String encodedCity = URLEncoder.encode(city, StandardCharsets.UTF_8);
-            JSONObject json = JSON.parseObject(HttpUtil.doGet(String.format(WTTR_URL, encodedCity)));
+            JSONObject json = JSON.parseObject(HttpUtil.doGet(
+                    String.format(WTTR_URL, encodedCity), true, WTTR_TIMEOUT_MS));
             if (json == null) {
                 return null;
             }
@@ -97,7 +100,8 @@ public class WeatherService {
 
             return formatDailyForecast(city, weather.getJSONObject(0), targetDate);
         } catch (Exception e) {
-            log.info("wttr weather fetch failed, fallback to alternate provider, city={}", city, e);
+            log.warn("wttr weather fetch failed, fallback to Open-Meteo, city={}, reason={}",
+                    city, e.getMessage());
             return null;
         }
     }
@@ -115,14 +119,16 @@ public class WeatherService {
 
             double latitude = Double.parseDouble(parts[1]);
             double longitude = Double.parseDouble(parts[0]);
-            JSONObject json = JSON.parseObject(HttpUtil.doGet(String.format(Locale.ROOT, OPEN_METEO_URL, latitude, longitude)));
+            JSONObject json = JSON.parseObject(HttpUtil.doGet(
+                    String.format(Locale.ROOT, OPEN_METEO_URL, latitude, longitude),
+                    true, OPEN_METEO_TIMEOUT_MS));
             if (json == null) {
                 return null;
             }
             JSONObject current = json.getJSONObject("current_weather");
             return current == null ? null : formatOpenMeteo(city, current);
         } catch (Exception e) {
-            log.warn("Open-Meteo weather fetch failed, city={}", city, e);
+            log.warn("Open-Meteo weather fetch failed, city={}, reason={}", city, e.getMessage());
             return null;
         }
     }

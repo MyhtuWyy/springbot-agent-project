@@ -1346,9 +1346,9 @@ button {
 }
 
 .message-bubble {
-  max-width: min(74%, 640px);
-  border-radius: 18px;
-  padding: 12px 14px;
+  max-width: min(82%, 760px);
+  border-radius: 14px;
+  padding: 13px 15px;
   box-shadow: 0 8px 22px rgba(40, 50, 42, 0.06);
   overflow-x: auto;
 }
@@ -1391,7 +1391,7 @@ button {
 
 .assistant-markdown {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   color: #243126;
 }
 
@@ -1403,7 +1403,7 @@ button {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-  line-height: 1.7;
+  line-height: 1.55;
 }
 
 .assistant-markdown h1,
@@ -1417,20 +1417,20 @@ button {
 }
 
 .assistant-markdown h1 {
-  font-size: 21px;
-}
-
-.assistant-markdown h2 {
   font-size: 18px;
 }
 
-.assistant-markdown h3 {
+.assistant-markdown h2 {
   font-size: 16px;
+}
+
+.assistant-markdown h3 {
+  font-size: 15px;
 }
 
 .assistant-markdown h4,
 .assistant-markdown h5 {
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .assistant-markdown ul,
@@ -1438,11 +1438,11 @@ button {
   margin: 0;
   padding-left: 20px;
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .assistant-markdown li {
-  line-height: 1.65;
+  line-height: 1.55;
 }
 
 .assistant-markdown strong {
@@ -1527,23 +1527,23 @@ button {
 .assistant-table-wrap {
   overflow-x: auto;
   border: 1px solid rgba(80, 96, 84, 0.08);
-  border-radius: 16px;
+  border-radius: 10px;
   background: #fbfdfb;
 }
 
 .assistant-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .assistant-table th,
 .assistant-table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid rgba(80, 96, 84, 0.08);
+  padding: 8px 9px;
+  border: 1px solid rgba(80, 96, 84, 0.1);
   text-align: left;
   vertical-align: top;
-  line-height: 1.55;
+  line-height: 1.45;
 }
 
 .assistant-table th {
@@ -1898,7 +1898,7 @@ button {
   }
 
   .message-bubble {
-    max-width: min(88%, 640px);
+    max-width: min(92%, 760px);
   }
 }
 

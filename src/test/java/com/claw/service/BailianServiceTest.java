@@ -84,4 +84,39 @@ class BailianServiceTest {
         assertEquals(toolResult.trim(), result);
         assertEquals(toolResult.trim(), delta.get());
     }
+
+    @Test
+    void enforcesFactualTicketSectionInTravelSummary() throws Exception {
+        BailianService service = new BailianService(Mockito.mock(ToolRegistry.class));
+        Method method = BailianService.class.getDeclaredMethod(
+                "enforceTicketSection", String.class, String.class
+        );
+        method.setAccessible(true);
+
+        String reply = """
+                1. 天气情况
+                晴天
+
+                2. 合适的高铁票
+                G802，约4小时
+
+                3. 攻略规划
+                第一天去景点
+                """;
+        String factual = """
+                ### 🚄 高铁票
+
+                **洛阳龙门 → 北京西** · 2026-09-14
+
+                | 车次 | 出发 | 到达 |
+                |---|---:|---:|
+                | G358 | 11:21 | 14:21 |
+                """;
+
+        String result = (String) method.invoke(service, reply, factual);
+
+        assertEquals(true, result.contains("G358"));
+        assertEquals(false, result.contains("G802"));
+        assertEquals(true, result.contains("3. 攻略规划"));
+    }
 }

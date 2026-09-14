@@ -127,6 +127,79 @@ public class ConversationMemoryService {
         addMessage(sessionId, "assistant", content, "normal");
     }
 
+    /**
+     * Save the currently generated assistant text so a client disconnect does not lose
+     * a useful clarification or partial answer.
+     */
+    @Transactional
+    public void saveStreamingAssistantMessage(String sessionId, String content) {
+        if (content == null || content.isBlank()) {
+            return;
+        }
+
+        SessionMemory memory = getOrCreateSession(sessionId);
+        String normalized = content.trim();
+        synchronized (memory) {
+            StoredMessage last = memory.messages.peekLast();
+            boolean updating = last != null
+                    && "assistant".equalsIgnoreCase(last.role)
+                    && "streaming".equalsIgnoreCase(last.messageType);
+            if (updating) {
+                memory.messages.removeLast();
+            }
+            memory.messages.addLast(new StoredMessage("assistant", normalized, "streaming"));
+            while (memory.messages.size() > maxMessages) {
+                memory.messages.removeFirst();
+            }
+
+            ChatMessageEntity entity = updating
+                    ? messageRepo.findTop1BySessionIdAndRoleAndMessageTypeOrderByCreatedAtDesc(
+                    sessionId, "assistant", "streaming")
+                    : null;
+            if (entity == null) {
+                entity = new ChatMessageEntity(
+                        sessionId, extractUserId(sessionId), "assistant", normalized, "streaming");
+            } else {
+                entity.setContent(normalized);
+            }
+            messageRepo.save(entity);
+            persistSession(sessionId, memory, !updating);
+        }
+    }
+
+    @Transactional
+    public void completeStreamingAssistantMessage(String sessionId, String content) {
+        if (content == null || content.isBlank()) {
+            return;
+        }
+
+        SessionMemory memory = getOrCreateSession(sessionId);
+        String normalized = content.trim();
+        synchronized (memory) {
+            StoredMessage last = memory.messages.peekLast();
+            if (last != null && "assistant".equalsIgnoreCase(last.role)
+                    && "streaming".equalsIgnoreCase(last.messageType)) {
+                memory.messages.removeLast();
+                memory.messages.addLast(new StoredMessage("assistant", normalized, "normal"));
+                ChatMessageEntity entity = messageRepo
+                        .findTop1BySessionIdAndRoleAndMessageTypeOrderByCreatedAtDesc(
+                                sessionId, "assistant", "streaming");
+                if (entity != null) {
+                    entity.setContent(normalized);
+                    entity.setMessageType("normal");
+                    messageRepo.save(entity);
+                    persistSession(sessionId, memory, false);
+                    return;
+                }
+                messageRepo.save(new ChatMessageEntity(
+                        sessionId, extractUserId(sessionId), "assistant", normalized, "normal"));
+                persistSession(sessionId, memory, false);
+                return;
+            }
+        }
+        addAssistantMessage(sessionId, normalized);
+    }
+
     @Transactional
     public void addEmotionUserMessage(String sessionId, String content) {
         addMessage(sessionId, "user", content, "emotion");

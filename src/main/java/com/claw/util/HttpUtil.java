@@ -7,11 +7,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.concurrent.TimeUnit;
 
 public class HttpUtil {
     private static final Logger log = LoggerFactory.getLogger(HttpUtil.class);
-    private static final OkHttpClient client = new OkHttpClient.Builder()
+    private static final OkHttpClient CLIENT = new OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(12, TimeUnit.SECONDS)
             .writeTimeout(8, TimeUnit.SECONDS)
@@ -24,26 +25,48 @@ public class HttpUtil {
     }
 
     public static String doGet(String url, boolean logBody) throws IOException {
+        return doGet(url, logBody, 15_000L);
+    }
+
+    public static String doGet(String url, boolean logBody, long timeoutMs) throws IOException {
+        long effectiveTimeoutMs = Math.max(1_000L, timeoutMs);
         Request request = new Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0")
                 .get()
                 .build();
+        OkHttpClient requestClient = CLIENT.newBuilder()
+                .connectTimeout(effectiveTimeoutMs, TimeUnit.MILLISECONDS)
+                .readTimeout(effectiveTimeoutMs, TimeUnit.MILLISECONDS)
+                .callTimeout(effectiveTimeoutMs, TimeUnit.MILLISECONDS)
+                .build();
 
-        try (Response response = client.newCall(request).execute()) {
-            log.info("GET请求地址:{},状态码:{}", url, response.code());
-            String body = "";
-            if (response.body() != null) {
-                body = response.body().string();
-            }
-            log.info("返回数据:{}", logBody ? body : summarizeBody(body));
+        try (Response response = requestClient.newCall(request).execute()) {
+            log.info("GET request, url={}, status={}", safeUrl(url), response.code());
+            String body = response.body() == null ? "" : response.body().string();
+            log.info("GET response body:{}", logBody ? body : summarizeBody(body));
             if (!response.isSuccessful()) {
-                throw new IOException("HTTP请求失败，状态码：" + response.code());
+                throw new IOException("HTTP request failed, status=" + response.code());
             }
             return body;
         } catch (IOException e) {
-            log.error("HTTP请求失败 url:{}", url, e);
-            throw new IOException("网络请求异常：" + e.getMessage());
+            log.warn("HTTP request failed, url={}, reason={}", safeUrl(url), e.getMessage());
+            throw new IOException("Network request failed: " + e.getMessage(), e);
+        }
+    }
+
+    private static String safeUrl(String url) {
+        try {
+            URI uri = URI.create(url);
+            String query = uri.getRawQuery();
+            if (query == null || query.isBlank()) {
+                return url;
+            }
+            String safeQuery = query.replaceAll("(?i)(^|&)key=[^&]*", "$1key=***");
+            return new URI(uri.getScheme(), uri.getRawAuthority(), uri.getRawPath(),
+                    safeQuery, uri.getRawFragment()).toString();
+        } catch (Exception ignored) {
+            return url.replaceAll("(?i)(key=)[^&\\s]*", "$1***");
         }
     }
 

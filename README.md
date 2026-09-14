@@ -1,341 +1,410 @@
 # 306-token 微信 AI 机器人
 
-基于 Spring Boot + 阿里云百炼（通义千问）的微信 AI 聊天机器人，支持 Function Calling 工具调用（天气查询、新闻搜索、物流跟踪、文件解析、文案生成、高德地图 POI 查询、行程规划、情绪树洞支持）、语音识别（ASR）、语音合成（TTS）、多轮对话记忆、图片描述等功能。
+基于 **Spring Boot 3 + Java 21 + 阿里云 DashScope** 的多工具 AI 助手项目，支持微信机器人、桌面端聊天、Function Calling 工具调用、文件解析、简历问答、岗位匹配、发票识别、语音识别/合成、定时任务和 MCP 扩展工具。
+
+> 说明：仓库不提交真实 `application.yml` 和密钥。拉取项目后，需要按本文档创建本地配置文件或配置环境变量后再运行。
+
+## 功能概览
+
+| 能力 | 说明 |
+|---|---|
+| AI 对话 | 接入 DashScope 兼容 OpenAI Chat Completions 接口，支持工具调用和多轮上下文 |
+| 微信机器人 | 支持微信登录、收发文本、图片、文件、语音等消息 |
+| 桌面端 | `desktop-app` 提供 React + Vite + Tauri 桌面聊天界面 |
+| 天气/新闻/物流 | 天气使用 wttr.in，新闻和物流使用天聚数行 |
+| 地图和出行 | 高德地图 POI、路线规划、旅行攻略，高铁票查询使用聚合数据接口 |
+| 文件解析 | 支持 TXT、Markdown、CSV、JSON、XML、YAML、PDF、Word |
+| Excel 工具 | 支持 Excel 查询、字段汇总、结果导出 |
+| 简历知识库 | 简历上传、分块、向量检索、简历问答 |
+| 岗位匹配 | 根据岗位链接和简历内容生成匹配分析 |
+| 发票识别 | 阿里云 OCR 发票识别、校验、台账行生成、Excel 导出 |
+| 语音能力 | DashScope ASR/TTS，支持语音转写和语音回复 |
+| 定时任务 | 可创建提醒任务，并在任务中接入新闻、天气、物流等工具 |
+| MCP 扩展 | 支持用户配置 MCP Server，并动态加载外部工具 |
 
 ## 技术栈
 
-- Java 21
-- Spring Boot 3.x
-- 阿里云 DashScope SDK（通义千问 qwen-turbo / qwen-vl-plus）
-- 天聚数行 API（新闻查询、物流查询）
-- 高德地图 API（POI 查询、地理编码、路线规划）
-- wttr.in 天气 API
-- 微信 Web 协议
+| 模块 | 技术 |
+|---|---|
+| 后端 | Java 21、Spring Boot 3.3、Spring Web、Spring Data JPA |
+| 数据库 | MySQL |
+| AI 模型 | 阿里云 DashScope / 通义千问 |
+| 向量检索 | Qdrant |
+| 文档解析 | Apache POI、PDFBox |
+| HTTP 客户端 | OkHttp、Fastjson2 |
+| 微信接入 | wechat-ilink-sdk |
+| 桌面端 | React 19、Vite、Tauri 2 |
 
----
+## 项目结构
 
-## 配置项说明
-
-所有配置均通过 Spring Boot 的 `application.yml` 统一管理，敏感配置必须通过环境变量注入（变量名示例见项目根目录 `.env.example`）。`APP_CONFIG_ENCRYPTION_KEY` 是必填项，用于加密用户模型配置中的 API Key；应用不会再使用内置 fallback 密钥。
-
-### 基础服务配置
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `server.port` | HTTP 服务端口 | `8080` |
-| `app.cli.enabled` | 是否启用命令行交互模式 | `true` |
-
-### AI 模型配置
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `DASHSCOPE_API_KEY` | 阿里云百炼 API Key（必填） | — |
-| `DASHSCOPE_MODEL` | 文本对话模型名称 | `qwen-turbo` |
-| `DASHSCOPE_VL_MODEL` | 视觉理解模型名称 | `qwen-vl-plus` |
-
-### 语音识别（ASR）配置
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `dashscope.asr.model` | 语音识别模型 | `qwen3-asr-flash` |
-| `dashscope.asr.language` | 识别语言 | `zh` |
-
-### 语音合成（TTS）配置
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `dashscope.tts.model` | TTS 模型名称 | `cosyvoice-v3-flash` |
-| `dashscope.tts.voice-id` | 默认发音人 ID | `longanhuan` |
-| `dashscope.tts.voice-alias-map` | 发音人别名映射（格式：`别名=voiceId;别名=voiceId`） | 内置多组默认映射 |
-| `dashscope.tts.verified-alias-map` | 已验证可用的发音人别名映射 | — |
-| `dashscope.tts.female-option-aliases` | 女声可选别名列表（逗号分隔） | `少女音,温婉女声,元气女声` |
-| `dashscope.tts.male-option-aliases` | 男声可选别名列表（逗号分隔） | `阳光男声,沉稳男声,洒脱男声,顽皮男声` |
-| `dashscope.tts.sample-rate` | 采样率 | `16000` |
-| `dashscope.tts.format` | 音频格式 | `wav` |
-| `dashscope.tts.speed` | 语速倍率 | `1.0` |
-| `dashscope.tts.volume` | 音量倍率 | `1.0` |
-| `dashscope.tts.pitch` | 音调偏移 | `0` |
-| `dashscope.tts.single-reply-max-chars` | 单条语音回复最大字符数 | `80` |
-| `dashscope.tts.segment-max-chars` | 语音分段最大字符数 | `100` |
-| `dashscope.tts.segment-min-chars` | 语音分段最小字符数 | `60` |
-
-### 微信语音配置
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `wechat.voice.default-encode-type` | 默认语音编码类型 | `1` |
-| `wechat.voice.silk-encode-type` | SILK 格式编码类型 | `6` |
-| `wechat.voice.default-bits-per-sample` | 默认采样位数 | `16` |
-| `wechat.voice.include-transcript` | 是否在语音消息中包含文字转录 | `false` |
-| `wechat.voice.segment-interval-ms` | 语音分段间隔（毫秒） | `250` |
-
-### 对话记忆配置
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `conversation.max-messages` | 每个会话最大保留消息数 | `20` |
-| `conversation.expire-minutes` | 会话过期时间（分钟） | `60` |
-
-### 天聚数行 API 配置
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `TIANAPI_KEY` | 天聚数行 API Key（必填，用于新闻查询、物流查询等所有天聚数行接口） | — |
-
-### 高德地图 API 配置
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `AMAP_API_KEY` | 高德地图 API Key（必填，用于 POI 查询、地理编码、路线规划） | — |
-
----
-
-## Function Calling 工具使用说明
-
-项目采用统一的工具注册机制，AI 可根据用户意图自动调用已注册的工具。
-
-### 工具框架结构
-
-```
-com.claw.tools
-├── ToolDefinition.java        # 工具定义接口（name/description/parametersSchema/execute）
-├── ToolRegistry.java          # 工具注册中心，自动收集所有 ToolDefinition 实现
-├── WeatherTool.java           # 天气查询工具
-├── NewsTool.java              # 天聚数行新闻查询工具
-├── LogisticsTool.java         # 天聚数行物流查询工具
-├── FileParseTool.java         # 文件解析工具（TXT/PDF/Word 等）
-├── CopywritingTool.java       # 文案生成工具箱（朋友圈文案/治愈短句/道歉文案/纪念日文案/小众签名）
-├── AmapTool.java              # 高德地图 POI 查询工具（景点/美食）
-├── TravelPlanTool.java        # 行程规划工具（天气+景点美食+路线）
-└── EmotionSupportTool.java    # 情绪树洞倾听与 ABC 情绪拆解工具
+```text
+306-token
+├─ src/main/java/com/claw
+│  ├─ controller/       # REST API：认证、桌面端、简历、发票、MCP、模型配置等
+│  ├─ service/          # 核心业务：AI 编排、工具路由、文件解析、微信、OCR、简历等
+│  ├─ tools/            # Function Calling 工具定义和注册
+│  ├─ config/           # CORS、MCP、Excel MCP、OCR、调度等配置
+│  ├─ entity/           # JPA 实体
+│  ├─ repository/       # 数据库访问层
+│  ├─ dto/              # 请求/响应 DTO
+│  ├─ mcp/              # MCP Client、进程管理和资源限制
+│  └─ util/             # 配置、HTTP 等通用工具
+├─ src/skills/com/claw/skills
+│  ├─ FileParseSkill.java       # 文件解析技能
+│  ├─ InvoiceSkill.java         # 发票 OCR 技能
+│  ├─ ResumeRagSkill.java       # 简历 RAG 技能
+│  ├─ ScheduledTaskSkill.java   # 定时任务技能
+│  └─ SpeechSkill.java          # 语音技能
+├─ src/main/resources
+│  ├─ application.yml           # 本地配置文件，仓库中建议不提交真实值
+│  └─ logback.xml               # 日志配置
+├─ desktop-app                  # React + Vite + Tauri 桌面端
+├─ docs                         # 项目文档
+├─ scripts                      # 辅助脚本
+├─ pom.xml                      # Maven 后端工程
+└─ .env.example                 # 环境变量示例
 ```
 
-- `ToolDefinition`：定义工具的元数据（名称、描述、参数 Schema）和执行逻辑
-- `ToolRegistry`：通过 Spring 自动注入所有 `ToolDefinition` 实现，统一构建 tools JSON 并分发调用
-- `BailianService`：通过 `ToolRegistry` 获取所有工具，无需手动维护工具列表
+## 已有工具
 
-### 已注册工具
+### Function Calling 工具
 
-#### 天气查询工具（WeatherTool）
+| 工具名 | 类 | 用途 |
+|---|---|---|
+| `get_weather` | `WeatherTool` | 查询城市或地点天气 |
+| `search_news` | `NewsTool` | 查询新闻和热点资讯 |
+| `query_logistics` | `LogisticsTool` | 查询快递物流或列出支持的快递公司 |
+| `parse_file` | `FileParseTool` | 解析上传文件、读取分片内容 |
+| `generate_copywriting` | `CopywritingTool` | 朋友圈、治愈短句、道歉、纪念日、签名等文案 |
+| `search_poi` | `PoiTool` | 查询景点、美食、附近推荐 |
+| `query_route` | `RouteTool` | 查询驾车、公交、步行等路线建议 |
+| `plan_travel` | `TravelPlanTool` | 生成旅行攻略，组合天气、景点、美食等信息 |
+| `query_train_tickets` | `TrainTicketTool` | 查询高铁/火车票；查不到车次时不虚构结果 |
+| `emotional_support` | `EmotionSupportTool` | 倾听和 ABC 情绪拆解 |
+| `resume_rag` | `ResumeRagTool` | 基于简历知识库问答 |
+| `resume_list` | `ResumeListTool` | 查询已上传简历列表 |
+| `job_match_url` | `JobMatchUrlTool` | 根据岗位链接进行简历匹配 |
+| `excel_query_file` | `ExcelQueryTool` | 查询 Excel 表格内容 |
+| `excel_summarize_columns` | `ExcelSummarizeTool` | 汇总 Excel 指定列 |
+| `excel_export_result` | `ExcelExportTool` | 导出 Excel 查询/汇总结果 |
 
-| 属性 | 值 |
-|------|------|
-| 工具名称 | `get_weather` |
-| 触发描述 | 查询指定城市的实时天气信息，当用户提到天气、气温、下雨、下雪、天气预报等关键词时调用 |
-| 参数 | `city`（string，必填）：城市名称，如"北京"、"上海" |
-| 数据来源 | [wttr.in](https://wttr.in) 开放天气接口 |
-| 依赖服务 | `WeatherService` |
+### Skill 工具
 
-示例对话：
-> 用户：杭州今天天气怎么样？
-> AI 自动调用 `get_weather(city="杭州")` → 返回实时天气信息
+| Skill | 用途 |
+|---|---|
+| `FileParseSkill` | 文件解析和文件问答 |
+| `InvoiceSkill` | 发票 OCR、校验、导出 |
+| `ResumeRagSkill` | 简历上传、检索和问答 |
+| `ScheduledTaskSkill` | 提醒、闹钟、定时推送 |
+| `SpeechSkill` | ASR 语音识别和 TTS 语音合成 |
 
-#### 天聚数行新闻查询工具（NewsTool）
+## 环境要求
 
-| 属性 | 值 |
-|------|------|
-| 工具名称 | `search_news` |
-| 触发描述 | 天聚数行新闻查询，搜索最新新闻和时事资讯。当用户提到新闻、时事、热点、头条、最新消息等关键词时调用 |
-| 参数 | `keyword`（string，必填）：新闻搜索关键词，如"AI"、"奥运会"、"股市" |
-| 数据来源 | [天聚数行](https://www.tianapi.com) 新闻 API |
-| 依赖服务 | `NewsService` |
-| 必需配置 | `application.yml` 中配置 `tianapi.key` |
+- JDK 21
+- Maven Wrapper：项目自带 `mvnw` / `mvnw.cmd`
+- MySQL 8.x
+- Node.js 20+ 和 npm
+- 可选：Qdrant，用于简历向量检索
+- 可选：Rust + Tauri CLI，用于桌面端打包
 
-示例对话：
-> 用户：最近有什么科技新闻？
-> AI 自动调用 `search_news(keyword="科技")` → 返回 5 条相关新闻摘要
+## 快速开始
 
-#### 天聚数行物流查询工具（LogisticsTool）
+### 1. 克隆项目
 
-| 属性 | 值 |
-|------|------|
-| 工具名称 | `query_logistics` |
-| 触发描述 | 查询快递物流信息，或列出支持的快递公司。当用户提供快递单号、询问快递/物流/包裹/运输进度/签收状态/物流轨迹时调用；当用户询问支持哪些快递公司时，action 设为 list_companies |
-| 参数 | `action`（string）：`query`=查询物流，`list_companies`=列出支持的快递公司；`number`（string，action=query 时必填）：快递单号；`company`（string，可选但建议填写）：快递公司名称；`sender_phone_last4`（string，可选）：手机号后四位 |
-| 支持快递公司 | 顺丰、中通、圆通、申通、韵达、京东、EMS、极兔、德邦、菜鸟、百世、天天、丰网 |
-| 数据来源 | [天聚数行](https://www.tianapi.com) 快递查询 API |
-| 依赖服务 | `LogisticsService` |
-| 必需配置 | `application.yml` 中配置 `tianapi.key` |
+```bash
+git clone <your-repo-url>
+cd 306-token
+```
 
-**智能重试机制**：当用户未指定快递公司且查询失败时，系统会自动尝试多家候选快递公司（最多重试 3 家），特别针对纯数字单号（如 12 位、13 位、16 位）的号段重叠问题进行了优化。
+### 2. 准备数据库
 
-**纯数字单号提示**：纯数字快递单号可能存在多家公司号段重叠的情况，如果查询失败，AI 会引导用户提供快递公司名称以提高准确率。
+创建 MySQL 数据库：
 
-示例对话：
-> 用户：帮我查一下顺丰快递 SF1234567890
-> AI 自动调用 `query_logistics(action="query", number="SF1234567890", company="顺丰")` → 返回物流轨迹
+```sql
+CREATE DATABASE wechat_bot DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
 
-> 用户：查一下 7512345678901234
-> AI 自动调用 `query_logistics(action="query", number="7512345678901234")` → 若首次失败，自动尝试中通、圆通、韵达等候选公司
+本项目使用 JPA，开发环境可将 `spring.jpa.hibernate.ddl-auto` 设置为 `update` 自动建表。
 
-> 用户：你们支持查哪些快递公司？
-> AI 自动调用 `query_logistics(action="list_companies")` → 返回支持的快递公司列表
+### 3. 创建本地配置
 
-#### 文件解析工具（FileParseTool）
+如果仓库中没有 `src/main/resources/application.yml`，请自行创建。推荐写法是：敏感值从环境变量读取，本地只保留占位配置。
 
-| 属性 | 值 |
-|------|------|
-| 工具名称 | `parse_file` |
-| 触发描述 | 解析用户发送的文档文件内容。当用户发送了文件并希望查看内容、总结要点、提取信息、回答文件相关问题时调用 |
-| 参数 | `action`（string，必填）：`info`=获取文件信息和预览，`full`=获取完整内容，`chunk`=获取指定分片；`file_name`（string，可选）：文件名；`chunk_index`（integer，可选）：分片索引 |
-| 支持格式 | TXT、Markdown、CSV、JSON、XML、YAML、PDF、Word(.docx) |
-| 依赖服务 | `FileParseService`（基于 Apache POI + PDFBox） |
+```yaml
+server:
+  port: 8080
 
-**文件解析流程**：
-1. 用户在微信发送文件 → WeChatService 下载并识别文件类型
-2. 若文件类型可解析 → FileParseService 提取文本内容并缓存
-3. 文件内容作为用户消息的一部分发送给 LLM
-4. LLM 可直接基于内容回答，或通过 `parse_file` 工具获取更详细的分片内容
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/wechat_bot?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
 
-**大文件分片**：超过 4000 字符的文件内容会自动分片，AI 可通过 `action=chunk` 和 `chunk_index` 参数逐片获取。
+app:
+  cli:
+    enabled: true
+  security:
+    encryption-key: ${APP_CONFIG_ENCRYPTION_KEY}
+  mcp:
+    allowed-commands: ${APP_MCP_ALLOWED_COMMANDS:node,npx,python,python3,uvx}
+    allowed-working-roots: ${APP_MCP_ALLOWED_WORKING_ROOTS:D:/mcp-server-files}
 
-示例对话：
-> 用户：[发送文件 report.pdf] 总结这份报告的要点
-> AI 自动解析 PDF 内容 → 基于内容生成总结
+dashscope:
+  api-key: ${DASHSCOPE_API_KEY}
+  base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  model: ${DASHSCOPE_MODEL:qwen-turbo}
+  vl-model: ${DASHSCOPE_VL_MODEL:qwen-vl-plus}
+  asr:
+    model: ${DASHSCOPE_ASR_MODEL:qwen3-asr-flash}
+    language: ${DASHSCOPE_ASR_LANGUAGE:zh}
+  tts:
+    model: ${DASHSCOPE_TTS_MODEL:cosyvoice-v3-flash}
+    voice-id: ${DASHSCOPE_TTS_VOICE_ID:longanhuan}
+    sample-rate: 16000
+    format: wav
+    speed: 1.0
+    volume: 1.0
+    pitch: 0
 
-> 用户：[发送文件 data.csv] 这个表格里有多少条数据？
-> AI 自动解析 CSV 内容 → 回答数据条数
+tianapi:
+  key: ${TIANAPI_KEY:}
 
-#### 文案生成工具箱（CopywritingTool）
+amap:
+  key: ${AMAP_API_KEY:}
 
-| 属性 | 值 |
-|------|------|
-| 工具名称 | `generate_copywriting` |
-| 触发描述 | 文案生成工具箱，支持多种文案创作场景。当用户提到朋友圈文案、治愈短句、道歉文案、纪念日文案、小众签名等需求时调用 |
-| 参数 | `type`（string，必填）：文案类型，可选 `moments`=朋友圈文案、`healing`=治愈短句、`apology`=道歉文案、`anniversary`=纪念日文案、`signature`=小众签名；`topic`（string，必填）：主题或场景描述；`count`（integer，可选）：生成条数，默认 3 条；`style`（string，可选）：风格偏好 |
-| 依赖服务 | 无外部依赖，由工具返回创作框架和风格指引，AI 在此基础上生成文案 |
+travel:
+  train-ticket:
+    api-key: ${TRAVEL_TRAIN_TICKET_API_KEY:}
+    api-url: ${TRAVEL_TRAIN_TICKET_API_URL:https://apis.juhe.cn/fapigw/train/query}
 
-示例对话：
-> 用户：帮我写几条去三亚旅游的朋友圈文案
-> AI 自动调用 `generate_copywriting(type="moments", topic="三亚旅游")` → 返回多条高质量文案
+qdrant:
+  url: ${QDRANT_URL:http://localhost:6333}
+  api-key: ${QDRANT_API_KEY:}
+  collection: ${QDRANT_COLLECTION:resume_chunks}
+  vector-size: ${QDRANT_VECTOR_SIZE:128}
 
-#### 高德地图 POI 查询工具（AmapTool）
+conversation:
+  max-messages: 20
+  expire-minutes: 60
+  resume-window-minutes: 60
 
-| 属性 | 值 |
-|------|------|
-| 工具名称 | `search_city_poi` |
-| 触发描述 | 查询指定城市的热门景点和特色美食。当用户提到旅游、景点、好玩的地方、美食、好吃的、餐厅推荐、城市攻略等关键词时调用 |
-| 参数 | `city`（string，必填）：城市名称；`type`（string，可选）：`attractions`=只查景点、`food`=只查美食、`both`=两者都查，默认 `both` |
-| 数据来源 | [高德地图](https://lbs.amap.com) POI 搜索 API |
-| 依赖服务 | `AmapService` |
-| 必需配置 | `application.yml` 中配置 `amap.key` |
+excel:
+  mcp:
+    enabled: false
+    file-root: ${EXCEL_MCP_FILE_ROOT:D:/mcp-server-files/excel}
+    preview-row-limit: 10
+    max-read-rows: 2000
+    max-export-rows: 5000
 
-示例对话：
-> 用户：成都有什么好玩的地方？
-> AI 自动调用 `search_city_poi(city="成都")` → 返回景点和美食推荐
+aliyun:
+  ocr:
+    enabled: ${ALIYUN_OCR_ENABLED:false}
+    access-key-id: ${ALIYUN_OCR_ACCESS_KEY_ID:}
+    access-key-secret: ${ALIYUN_OCR_ACCESS_KEY_SECRET:}
+    endpoint: ${ALIYUN_OCR_ENDPOINT:ocr.cn-shanghai.aliyuncs.com}
+    auto-verify: true
+    max-file-size-mb: 10
 
-> 用户：杭州有什么好吃的？
-> AI 自动调用 `search_city_poi(city="杭州", type="food")` → 返回美食推荐
+wechat:
+  voice:
+    default-encode-type: 1
+    silk-encode-type: 6
+    default-bits-per-sample: 16
+    include-transcript: false
+    segment-interval-ms: 250
+```
 
-#### 行程规划工具（TravelPlanTool）
+### 4. 配置环境变量
 
-| 属性 | 值 |
-|------|------|
-| 工具名称 | `plan_travel` |
-| 触发描述 | 城市旅行行程规划助手。综合查询城市天气、热门景点、特色美食，并支持路线规划。当用户提到旅行规划、行程安排、旅游攻略、出行计划、周末去哪玩等关键词时调用 |
-| 参数 | `city`（string，必填）：目标城市；`travel_type`（string，可选）：`attractions`/`food`/`both`，默认 `both`；`origin`（string，可选）：出发地；`destination`（string，可选）：目的地；`transport_mode`（string，可选）：`driving`/`transit`/`walking`/`riding`，默认 `driving` |
-| 数据来源 | [wttr.in](https://wttr.in) 天气 API + [高德地图](https://lbs.amap.com) POI/路线 API |
-| 依赖服务 | `WeatherService`、`AmapService` |
-| 必需配置 | `application.yml` 中配置 `amap.key` |
+可以参考根目录 `.env.example`。至少需要配置：
 
-**功能特点**：综合天气查询 + 景点美食推荐 + 多模式路线规划（驾车/公交/步行/骑行），为用户提供一站式旅行参考信息。
+| 环境变量 | 必需 | 说明 |
+|---|---:|---|
+| `APP_CONFIG_ENCRYPTION_KEY` | 是 | 用户模型配置 API Key 的加密密钥，建议 32 位以上随机字符串 |
+| `DASHSCOPE_API_KEY` | 是 | 阿里云 DashScope API Key |
+| `SPRING_DATASOURCE_URL` | 是 | MySQL JDBC 地址 |
+| `SPRING_DATASOURCE_USERNAME` | 是 | MySQL 用户名 |
+| `SPRING_DATASOURCE_PASSWORD` | 是 | MySQL 密码 |
+| `TIANAPI_KEY` | 否 | 新闻、物流查询需要 |
+| `AMAP_API_KEY` | 否 | POI、路线、旅行规划需要 |
+| `TRAVEL_TRAIN_TICKET_API_KEY` | 否 | 高铁票查询需要 |
+| `ALIYUN_OCR_ACCESS_KEY_ID` | 否 | 发票 OCR 需要 |
+| `ALIYUN_OCR_ACCESS_KEY_SECRET` | 否 | 发票 OCR 需要 |
+| `QDRANT_URL` | 否 | 简历向量检索需要 |
+| `QDRANT_API_KEY` | 否 | Qdrant 有鉴权时填写 |
 
-示例对话：
-> 用户：我想周末去杭州玩，从上海出发
-> AI 自动调用 `plan_travel(city="杭州", origin="上海", transport_mode="driving")` → 返回天气+景点美食+路线规划
+Windows PowerShell 示例：
 
-#### 情绪支持工具（EmotionSupportTool）
+```powershell
+$env:APP_CONFIG_ENCRYPTION_KEY="replace-with-random-secret"
+$env:DASHSCOPE_API_KEY="sk-xxx"
+$env:SPRING_DATASOURCE_USERNAME="root"
+$env:SPRING_DATASOURCE_PASSWORD="your-password"
+```
 
-| 属性 | 值 |
-|------|------|
-| 工具名称 | `emotional_support` |
-| 触发描述 | 提供情绪树洞倾听和 ABC 情绪拆解支持。当用户表现出情绪倾诉、心情低落、需要心理支持等需求时调用 |
-| 参数 | `sessionId`（string，必填）：当前会话标识；`mode`（string，必填）：`listen`=纯倾听模式、`abc`=ABC 情绪拆解模式；`confession`（string，必填）：用户本次倾诉内容 |
-| 依赖服务 | `EmotionMemoryService` |
+macOS / Linux 示例：
 
-**ABC 情绪拆解流程**：基于心理学 ABC 理论，分步骤引导用户完成情绪梳理：
-1. **A（事件）**：引导用户描述引发情绪的具体事件
-2. **B（信念）**：帮助用户识别当时的想法和信念
-3. **C（情绪）**：引导用户描述情绪和身体感受
-4. **D（反驳）**：引导用户尝试反驳不合理信念
-5. **E（新信念）**：帮助用户形成更理性的新信念
+```bash
+export APP_CONFIG_ENCRYPTION_KEY="replace-with-random-secret"
+export DASHSCOPE_API_KEY="sk-xxx"
+export SPRING_DATASOURCE_USERNAME="root"
+export SPRING_DATASOURCE_PASSWORD="your-password"
+```
 
-示例对话：
-> 用户：今天心情好差，感觉什么都不顺
-> AI 自动调用 `emotional_support(sessionId="xxx", mode="listen", confession="今天心情好差...")` → 提供共情回应，并可引导进入 ABC 拆解
+## 运行后端
 
-### 新增工具指南
+Windows：
 
-新增一个 AI 可调用工具只需 3 步，**无需修改任何其他类的代码**：
+```powershell
+.\mvnw.cmd clean package -DskipTests
+java -jar target/wechat-bot-1.0-SNAPSHOT.jar
+```
 
-1. **在 `com.claw.tools` 包下创建实现类**，实现 `ToolDefinition` 接口
-2. **加上 `@Component` 注解**，让 Spring 自动扫描
-3. **实现 4 个方法**：
+macOS / Linux：
+
+```bash
+./mvnw clean package -DskipTests
+java -jar target/wechat-bot-1.0-SNAPSHOT.jar
+```
+
+启动后默认监听：
+
+```text
+http://127.0.0.1:8080
+```
+
+可用接口示例：
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/auth/capabilities` | 检查后端是否可用 |
+| `POST /api/auth/register` | 桌面端注册 |
+| `POST /api/auth/login` | 桌面端登录 |
+| `POST /api/desktop/chat` | 桌面端普通聊天 |
+| `POST /api/desktop/chat/stream` | 桌面端流式聊天 |
+| `POST /api/desktop/files/upload` | 上传文件 |
+| `GET /api/system/status` | 系统状态 |
+
+## 运行桌面端
+
+进入桌面端目录并安装依赖：
+
+```bash
+cd desktop-app
+npm install
+```
+
+开发运行：
+
+```bash
+npm run dev
+```
+
+`desktop-app/scripts/dev.ps1` 会检查 `8080` 后端是否可用；如果后端未启动，会尝试先打包并启动 Spring Boot 后端。
+
+只构建前端：
+
+```bash
+npm run build
+```
+
+Tauri 开发模式：
+
+```bash
+npm run tauri:dev
+```
+
+## 常用配置说明
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `server.port` | `8080` | 后端 HTTP 端口 |
+| `app.cli.enabled` | `true` | 是否启用命令行交互 |
+| `dashscope.model` | `qwen-turbo` | 文本对话模型 |
+| `dashscope.vl-model` | `qwen-vl-plus` | 图片理解模型 |
+| `dashscope.asr.model` | `qwen3-asr-flash` | 语音识别模型 |
+| `dashscope.tts.model` | `cosyvoice-v3-flash` | 语音合成模型 |
+| `conversation.max-messages` | `20` | 单会话最大上下文消息数 |
+| `conversation.expire-minutes` | `60` | 内存会话过期时间 |
+| `conversation.resume-window-minutes` | `60` | 可从数据库恢复上下文的窗口 |
+| `qdrant.collection` | `resume_chunks` | 简历向量集合 |
+| `excel.mcp.enabled` | `false` | 是否启用 Excel MCP 能力 |
+| `aliyun.ocr.enabled` | `false` | 是否启用阿里云 OCR |
+
+## 数据来源
+
+| 能力 | 数据源 |
+|---|---|
+| 文本/视觉/语音模型 | [阿里云 DashScope](https://dashscope.aliyun.com/) |
+| 天气 | [wttr.in](https://wttr.in) |
+| 新闻、物流 | [天聚数行](https://www.tianapi.com) |
+| POI、地理编码、路线 | [高德开放平台](https://lbs.amap.com) |
+| 高铁/火车票 | [聚合数据](https://www.juhe.cn/) |
+| 发票 OCR | 阿里云 OCR |
+| 简历向量检索 | Qdrant |
+
+## 开发说明
+
+### 新增 Function Calling 工具
+
+新增一个工具只需要：
+
+1. 在 `src/main/java/com/claw/tools` 下创建类并实现 `ToolDefinition`
+2. 添加 `@Component`
+3. 实现 `name()`、`description()`、`parametersSchema()`、`execute()`
+
+示例：
 
 ```java
 @Component
-public class MyNewTool implements ToolDefinition {
-
+public class MyTool implements ToolDefinition {
     @Override
     public String name() {
-        return "my_tool";  // snake_case 命名
+        return "my_tool";
     }
 
     @Override
     public String description() {
-        return "工具描述，告诉 AI 什么时候调用此工具";
+        return "说明 AI 什么时候应该调用这个工具";
     }
 
     @Override
     public JSONObject parametersSchema() {
-        // 返回 JSON Schema，定义工具参数
-        JSONObject parameters = new JSONObject();
-        parameters.put("type", "object");
-
-        JSONObject properties = new JSONObject();
-        JSONObject param = new JSONObject();
-        param.put("type", "string");
-        param.put("description", "参数描述");
-        properties.put("param_name", param);
-
-        parameters.put("properties", properties);
-        parameters.put("required", new JSONArray().fluentAdd("param_name"));
-        return parameters;
+        JSONObject schema = new JSONObject();
+        schema.put("type", "object");
+        schema.put("properties", new JSONObject());
+        schema.put("required", new JSONArray());
+        return schema;
     }
 
     @Override
     public String execute(String arguments) {
-        // 解析参数并执行业务逻辑
-        JSONObject args = JSON.parseObject(arguments);
         return "执行结果";
     }
 }
 ```
 
-`ToolRegistry` 会在启动时自动发现并注册新工具，`BailianService` 会在 AI 对话中自动将其纳入 Function Calling 工具列表。
+`ToolRegistry` 会在启动时自动收集所有 `ToolDefinition` Bean，`BailianService` 会把它们纳入工具调用列表。
 
----
+### 本地文件和敏感信息
 
-## 构建与运行
+- 不要提交真实 `application.yml`、`.env`、API Key、数据库密码。
+- 推荐提交 `.env.example` 或 README 中的配置模板。
+- `target/`、`logs/`、`desktop-app/node_modules/`、`desktop-app/dist/` 属于本地生成内容，通常不需要提交。
 
-```bash
-# 构建
-mvnw clean package -DskipTests
+## 排查建议
 
-# 运行（确保 application.yml 已配置）
-java -jar target/wechat-bot-*.jar
-```
-
-当前关于上下文消息管理，有内存和数据库两种方式，分别对应 `application.yml` 中的 `context.memory` 和 `context.database` 配置。
-流程：用户登录后可以  
-1.开启新对话，清理内存和Mysql,回复已重置
-2.继续上次，强制从Mysql加载，回复已恢复
-3.正常发送消息的话，先判断内存有没有数据，有直接用，没有的话查看Mysql，最后活跃小于1小时，加载到内存，接着聊，最后活跃大于1小时或者没数据，就当新对话，重新聊。
-
-定时任务接入了新闻，天气，物流查询三个工具，单独做另一个agent循环子链路，循环判断自然对话中需要调用什么工具。
-
-
-现在问题，简历匹配之后他这条路就算走完了，不在就建立匹配这方面继续追问，再发消息也是一个新话题，还有直接查景点和美食，通过大模型回复，他回复的模式要优化一下，不能看起来一团糟
-
-
-对于发送文件后，判断是文件解析，简历匹配还是Excel读取导出，做一个轻量会话状态机。先判断当前会话任务态，再决定是否继续，切换，确认。解决用户继续追问时，不跑偏；用户开启新话题时，能及时脱离文件上下文。当上传可解析文档后，默认不立刻强进，明显问内容时总结，上传Excel文件时，弱绑定，当说读取/导出时，进入；发岗位链接时进入岗位匹配。
+| 问题 | 检查项 |
+|---|---|
+| 后端启动失败 | JDK 是否为 21、MySQL 是否启动、`application.yml` 是否存在 |
+| AI 无回复或鉴权失败 | `DASHSCOPE_API_KEY` 是否正确，模型是否有权限 |
+| 新闻/物流不可用 | `TIANAPI_KEY` 是否配置 |
+| 地图/旅行规划不可用 | `AMAP_API_KEY` 是否配置 |
+| 高铁票查不到 | `TRAVEL_TRAIN_TICKET_API_KEY` 是否配置，接口是否返回空结果 |
+| 发票识别不可用 | `aliyun.ocr.enabled` 和阿里云 OCR 密钥是否配置 |
+| 桌面端连不上后端 | 确认后端 `8080` 端口正常，或设置 `VITE_API_BASE_URL` |

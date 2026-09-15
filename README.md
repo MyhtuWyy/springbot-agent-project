@@ -1,4 +1,4 @@
-# 306-token 微信 AI 机器人
+# 微信 AI 机器人
 
 基于 **Spring Boot 3 + Java 21 + 阿里云 DashScope** 的多工具 AI 助手项目，支持微信机器人、桌面端聊天、Function Calling 工具调用、文件解析、简历问答、岗位匹配、发票识别、语音识别/合成、定时任务和 MCP 扩展工具。
 
@@ -38,7 +38,7 @@
 ## 项目结构
 
 ```text
-306-token
+3-token
 ├─ src/main/java/com/claw
 │  ├─ controller/       # REST API：认证、桌面端、简历、发票、MCP、模型配置等
 │  ├─ service/          # 核心业务：AI 编排、工具路由、文件解析、微信、OCR、简历等
